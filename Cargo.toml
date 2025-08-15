@@ -6,3 +6,4 @@ edition = "2024"
 [dependencies]
 winit = { version = "0.30.12" }
 wgpu = { version = "26.0" }
+pollster = { version = "0.4.0" }
