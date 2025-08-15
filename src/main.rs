@@ -22,6 +22,30 @@ struct State {
 }
 
 impl State {
+    fn new(window: Arc<Window>) -> Self {
+        let instance = Instance::new(&InstanceDescriptor::default());
+        let adapter = instance
+            .request_adapter(&RequestAdapterOptions::default())
+            .block_on()
+            .unwrap();
+        let (device, queue) = adapter
+            .request_device(&wgpu::DeviceDescriptor::default())
+            .block_on()
+            .unwrap();
+        let size = window.inner_size();
+
+        let surface = instance.create_surface(window.clone()).unwrap();
+        let texture_format = surface.get_capabilities(&adapter).formats[0];
+
+        State {
+            surface,
+            queue,
+            size,
+            device,
+            texture_format,
+        }
+    }
+
     fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
         self.size = new_size;
 
@@ -62,31 +86,10 @@ impl ApplicationHandler for App {
                 .unwrap(),
         );
 
+        let state = State::new(window.clone());
+        state.configure_surface();
+        self.state = Some(state);
         self.window = Some(window.clone());
-        // create surface
-        {
-            let instance = Instance::new(&InstanceDescriptor::default());
-            let adapter = instance
-                .request_adapter(&RequestAdapterOptions::default())
-                .block_on()
-                .unwrap();
-            let (device, queue) = adapter
-                .request_device(&wgpu::DeviceDescriptor::default())
-                .block_on()
-                .unwrap();
-            let size = window.inner_size();
-
-            let surface = instance.create_surface(window.clone()).unwrap();
-            let texture_format = surface.get_capabilities(&adapter).formats[0];
-            self.state = Some(State {
-                surface,
-                queue,
-                size,
-                device,
-                texture_format,
-            });
-            self.state.as_ref().unwrap().configure_surface();
-        }
         window.request_redraw();
     }
 
