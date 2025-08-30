@@ -45,7 +45,7 @@ impl State {
         let texture_format = surface.get_capabilities(&adapter).formats[0];
 
         // sprite texture
-        let sprites_img = image::load_from_memory(SPRITES).unwrap().flipv();
+        let sprites_img = image::load_from_memory(SPRITES).unwrap();
         let sprites_img_rgba = sprites_img.to_rgba8();
         let tex_size = Extent3d {
             width: sprites_img_rgba.dimensions().0,
@@ -230,7 +230,11 @@ impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         let window = Arc::new(
             event_loop
-                .create_window(Window::default_attributes())
+                .create_window(
+                    Window::default_attributes()
+                        .with_inner_size(PhysicalSize::new(800, 600))
+                        .with_resizable(false),
+                )
                 .unwrap(),
         );
 
