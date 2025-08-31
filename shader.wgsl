@@ -1,5 +1,6 @@
-const WIDTH: f32 = 800f;
-const HEIGHT: f32 = 600f;
+const WIDTH: f32 = 800;
+const HEIGHT: f32 = 600;
+const SPRITE_TILE_SIZE: f32 = 0.125;
 
 fn ortho(left: f32, right: f32, bottom: f32, top: f32, near: f32, far: f32) -> mat4x4f {
  return mat4x4f(
@@ -36,10 +37,14 @@ fn vs_main(@builtin(vertex_index) in_vertex_index: u32) -> VertexOutput {
 
     let ortho_mat = ortho(0, WIDTH, HEIGHT, 0, 0.1, 100);
     let pos = points_arr[in_vertex_index];
+    let tex_coords = tex_coords_arr[in_vertex_index];
 
     return VertexOutput(
         ortho_mat * vec4<f32>(pos.x, pos.y, 1.0, 1.0),
-        tex_coords_arr[in_vertex_index]
+        vec2f(   
+          (0 + tex_coords.x) * SPRITE_TILE_SIZE,
+          (1 + tex_coords.y) * SPRITE_TILE_SIZE
+        )
     );
 }
 
