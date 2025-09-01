@@ -1,10 +1,10 @@
-use std::{borrow::Cow, rc::Rc, sync::Arc};
+use std::{borrow::Cow, sync::Arc};
 
 use pollster::FutureExt as _;
 use wgpu::{
-    BindGroup, BindGroupEntry, BindGroupLayoutEntry, Device, Extent3d, Instance,
-    InstanceDescriptor, Queue, RenderPipeline, RequestAdapterOptions, SamplerBindingType,
-    SamplerDescriptor, ShaderStages, Surface, SurfaceConfiguration, SurfaceTarget,
+    BindGroup, BindGroupEntry, BindGroupLayoutEntry, BufferUsages, Device, Extent3d,
+    Instance, InstanceDescriptor, Queue, RenderPipeline, RequestAdapterOptions, SamplerBindingType,
+    SamplerDescriptor, ShaderStages, Surface, SurfaceConfiguration,
     TexelCopyTextureInfo, TextureFormat, TextureUsages, TextureViewDescriptor,
 };
 use winit::{
@@ -16,6 +16,13 @@ use winit::{
 };
 
 const SPRITES: &[u8] = include_bytes!("../spelunky_shop.png");
+const OBJECTS: [Vec2f; 2] = [Vec2f { x: 0.0, y: 0.0 }, Vec2f { x: 200.0, y: 200.0 }];
+
+#[derive(bincode::Encode, Debug, PartialEq)]
+struct Vec2f {
+    x: f32,
+    y: f32,
+}
 
 struct State {
     device: Device,
@@ -25,6 +32,7 @@ struct State {
     render_pipeline: RenderPipeline,
     texture_format: TextureFormat,
     texture_bind_group: BindGroup,
+    uniform_position_bind_groups: Vec<BindGroup>,
 }
 
 impl State {
@@ -125,6 +133,52 @@ impl State {
             ],
         });
 
+        // uniform position
+        let uniform_position_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                entries: &[BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+                label: Some("uniform_postion_bind_group_layout"),
+            });
+
+        let mut uniform_position_bind_groups = vec![];
+        for obj_pos in OBJECTS {
+            let uniform_position_buffer = device.create_buffer(&wgpu::wgt::BufferDescriptor {
+                label: None,
+                size: size_of::<Vec2f>() as u64,
+                usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            queue.write_buffer(
+                &uniform_position_buffer,
+                0,
+                &bincode::encode_to_vec(obj_pos, bincode::config::standard()).unwrap(),
+            );
+
+            let uniform_position_bind_group =
+                device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("uniform_position_bind_group"),
+                    layout: &uniform_position_bind_group_layout,
+                    entries: &[BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                            buffer: &uniform_position_buffer,
+                            size: None,
+                            offset: 0,
+                        }),
+                    }],
+                });
+
+            uniform_position_bind_groups.push(uniform_position_bind_group);
+        }
         // shader loader
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("shader_module"),
@@ -132,7 +186,10 @@ impl State {
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("pipeline_layout"),
-            bind_group_layouts: &[&texture_bind_group_layout],
+            bind_group_layouts: &[
+                &texture_bind_group_layout,
+                &uniform_position_bind_group_layout,
+            ],
             push_constant_ranges: &[],
         });
 
@@ -166,6 +223,7 @@ impl State {
             render_pipeline,
             texture_format,
             texture_bind_group,
+            uniform_position_bind_groups,
         }
     }
 
@@ -213,7 +271,11 @@ impl State {
             });
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_bind_group(0, Some(&self.texture_bind_group), &[]);
-            render_pass.draw(0..6, 0..1);
+
+            for uniform_position_bind_group in self.uniform_position_bind_groups.clone() {
+                render_pass.set_bind_group(1, Some(&uniform_position_bind_group), &[]);
+                render_pass.draw(0..6, 0..1);
+            }
         }
         self.queue.submit([encoder.finish()].into_iter());
         surface_texture.present();
@@ -245,7 +307,7 @@ impl ApplicationHandler for App {
         window.request_redraw();
     }
 
-    fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+    fn window_event(&mut self, event_loop: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
         match event {
             WindowEvent::CloseRequested => {
                 event_loop.exit();

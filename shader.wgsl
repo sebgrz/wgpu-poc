@@ -16,6 +16,11 @@ struct VertexOutput {
     @location(0) tex_coords: vec2<f32>,
 }
 
+
+@group(1)
+@binding(0)
+var<uniform> obj_position: vec2f;
+
 @vertex
 fn vs_main(@builtin(vertex_index) in_vertex_index: u32) -> VertexOutput {
     let points_arr = array(
@@ -40,7 +45,10 @@ fn vs_main(@builtin(vertex_index) in_vertex_index: u32) -> VertexOutput {
     let tex_coords = tex_coords_arr[in_vertex_index];
 
     return VertexOutput(
-        ortho_mat * vec4<f32>(pos.x, pos.y, 1.0, 1.0),
+        ortho_mat * vec4<f32>(
+          obj_position.x + pos.x, 
+          obj_position.y + pos.y, 
+          1.0, 1.0),
         vec2f(   
           (0 + tex_coords.x) * SPRITE_TILE_SIZE,
           (1 + tex_coords.y) * SPRITE_TILE_SIZE
