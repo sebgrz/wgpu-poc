@@ -2,10 +2,10 @@ use std::{borrow::Cow, sync::Arc};
 
 use pollster::FutureExt as _;
 use wgpu::{
-    BindGroup, BindGroupEntry, BindGroupLayoutEntry, BufferUsages, Device, Extent3d,
-    Instance, InstanceDescriptor, Queue, RenderPipeline, RequestAdapterOptions, SamplerBindingType,
-    SamplerDescriptor, ShaderStages, Surface, SurfaceConfiguration,
-    TexelCopyTextureInfo, TextureFormat, TextureUsages, TextureViewDescriptor,
+    BindGroup, BindGroupEntry, BindGroupLayoutEntry, BufferUsages, Device, Extent3d, Instance,
+    InstanceDescriptor, Queue, RenderPipeline, RequestAdapterOptions, SamplerBindingType,
+    SamplerDescriptor, ShaderStages, Surface, SurfaceConfiguration, TexelCopyTextureInfo,
+    TextureFormat, TextureUsages, TextureViewDescriptor,
 };
 use winit::{
     application::ApplicationHandler,
@@ -16,12 +16,27 @@ use winit::{
 };
 
 const SPRITES: &[u8] = include_bytes!("../spelunky_shop.png");
-const OBJECTS: [Vec2f; 2] = [Vec2f { x: 0.0, y: 0.0 }, Vec2f { x: 200.0, y: 200.0 }];
+const OBJECTS: [Vec4f; 2] = [
+    Vec4f {
+        x: 0.0,
+        y: 0.0,
+        a: 0.0,
+        b: 1.0,
+    },
+    Vec4f {
+        x: 200.0,
+        y: 200.0,
+        a: 1.0,
+        b: 1.0,
+    },
+];
 
 #[derive(bincode::Encode, Debug, PartialEq)]
-struct Vec2f {
+struct Vec4f {
     x: f32,
     y: f32,
+    a: f32,
+    b: f32,
 }
 
 struct State {
@@ -153,7 +168,7 @@ impl State {
         for obj_pos in OBJECTS {
             let uniform_position_buffer = device.create_buffer(&wgpu::wgt::BufferDescriptor {
                 label: None,
-                size: size_of::<Vec2f>() as u64,
+                size: size_of::<Vec4f>() as u64,
                 usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             });

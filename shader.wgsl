@@ -19,7 +19,7 @@ struct VertexOutput {
 
 @group(1)
 @binding(0)
-var<uniform> obj_position: vec2f;
+var<uniform> obj_position: vec4f;
 
 @vertex
 fn vs_main(@builtin(vertex_index) in_vertex_index: u32) -> VertexOutput {
@@ -50,8 +50,8 @@ fn vs_main(@builtin(vertex_index) in_vertex_index: u32) -> VertexOutput {
           obj_position.y + pos.y, 
           1.0, 1.0),
         vec2f(   
-          (0 + tex_coords.x) * SPRITE_TILE_SIZE,
-          (1 + tex_coords.y) * SPRITE_TILE_SIZE
+          (obj_position.z + tex_coords.x) * SPRITE_TILE_SIZE,
+          (obj_position.w + tex_coords.y) * SPRITE_TILE_SIZE
         )
     );
 }
