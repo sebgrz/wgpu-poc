@@ -5,7 +5,7 @@ use wgpu::{
     BindGroup, BindGroupEntry, BindGroupLayoutEntry, BufferUsages, Device, Extent3d, Instance,
     InstanceDescriptor, Queue, RenderPipeline, RequestAdapterOptions, SamplerBindingType,
     SamplerDescriptor, ShaderStages, Surface, SurfaceConfiguration, TexelCopyTextureInfo,
-    TextureFormat, TextureUsages, TextureViewDescriptor,
+    TextureFormat, TextureUsages, TextureView, TextureViewDescriptor,
 };
 use winit::{
     application::ApplicationHandler,
@@ -44,10 +44,13 @@ struct State {
     queue: Queue,
     size: PhysicalSize<u32>,
     surface: Surface<'static>,
-    render_pipeline: RenderPipeline,
+    post_process_pipeline: RenderPipeline,
+    framebuffer_pipeline: RenderPipeline,
     texture_format: TextureFormat,
     texture_bind_group: BindGroup,
+    post_process_bind_group: BindGroup,
     uniform_position_bind_groups: Vec<BindGroup>,
+    framebuffer_texture_view: TextureView,
 }
 
 impl State {
@@ -65,7 +68,26 @@ impl State {
         let size = window.inner_size();
 
         let surface = instance.create_surface(window.clone()).unwrap();
-        let texture_format = surface.get_capabilities(&adapter).formats[0];
+        let surface_texture_format = surface.get_capabilities(&adapter).formats[0];
+
+        // framebuffer texture
+        let framebuffer_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("framebuffer_texture"),
+            dimension: wgpu::TextureDimension::D2,
+            format: surface_texture_format,
+            mip_level_count: 1,
+            sample_count: 1,
+            size: Extent3d {
+                width: 800,
+                height: 600,
+                ..Default::default()
+            },
+            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[], //TextureFormat::Rgba8UnormSrgb]
+        });
+
+        let framebuffer_texture_view =
+            framebuffer_texture.create_view(&TextureViewDescriptor::default());
 
         // sprite texture
         let sprites_img = image::load_from_memory(SPRITES).unwrap();
@@ -111,6 +133,7 @@ impl State {
             mipmap_filter: wgpu::FilterMode::Nearest,
             ..Default::default()
         });
+
         let texture_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 entries: &[
@@ -133,6 +156,8 @@ impl State {
                 ],
                 label: Some("bind_group_layout"),
             });
+
+        // pipeline bind groups
         let texture_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("bind_group"),
             layout: &texture_bind_group_layout,
@@ -140,6 +165,21 @@ impl State {
                 BindGroupEntry {
                     binding: 0,
                     resource: wgpu::BindingResource::TextureView(&sprites_texture_view),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&texture_sampler),
+                },
+            ],
+        });
+
+        let framebuffer_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("framebuffer_bind_group"),
+            layout: &texture_bind_group_layout,
+            entries: &[
+                BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&framebuffer_texture_view),
                 },
                 BindGroupEntry {
                     binding: 1,
@@ -161,7 +201,7 @@ impl State {
                     },
                     count: None,
                 }],
-                label: Some("uniform_postion_bind_group_layout"),
+                label: Some("uniform_position_bind_group_layout"),
             });
 
         let mut uniform_position_bind_groups = vec![];
@@ -194,23 +234,32 @@ impl State {
 
             uniform_position_bind_groups.push(uniform_position_bind_group);
         }
+
         // shader loader
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("shader_module"),
             source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("../shader.wgsl"))),
         });
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("pipeline_layout"),
-            bind_group_layouts: &[
-                &texture_bind_group_layout,
-                &uniform_position_bind_group_layout,
-            ],
-            push_constant_ranges: &[],
+        let post_process_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("post_process_shader_module"),
+            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
+                "../post_process_shader.wgsl"
+            ))),
         });
 
-        let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("render_pipeline"),
-            layout: Some(&pipeline_layout),
+        let framebuffer_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("framebuffer_pipeline_layout"),
+                bind_group_layouts: &[
+                    &texture_bind_group_layout,
+                    &uniform_position_bind_group_layout,
+                ],
+                push_constant_ranges: &[],
+            });
+
+        let framebuffer_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("framebuffer_pipeline"),
+            layout: Some(&framebuffer_pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
                 buffers: &[],
@@ -221,7 +270,7 @@ impl State {
                 module: &shader,
                 entry_point: Some("fs_main"),
                 compilation_options: Default::default(),
-                targets: &[Some(texture_format.into())],
+                targets: &[Some(surface_texture_format.into())],
             }),
             primitive: wgpu::PrimitiveState::default(),
             multiview: None,
@@ -230,15 +279,48 @@ impl State {
             depth_stencil: None,
         });
 
+        let post_process_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("post_process_pipeline_layout"),
+                bind_group_layouts: &[&texture_bind_group_layout],
+                push_constant_ranges: &[],
+            });
+
+        let post_process_pipeline =
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("post_process_pipeline"),
+                layout: Some(&post_process_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &post_process_shader,
+                    buffers: &[],
+                    entry_point: Some("vs_main"),
+                    compilation_options: Default::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &post_process_shader,
+                    entry_point: Some("fs_main"),
+                    compilation_options: Default::default(),
+                    targets: &[Some(surface_texture_format.into())],
+                }),
+                primitive: wgpu::PrimitiveState::default(),
+                multiview: None,
+                multisample: wgpu::MultisampleState::default(),
+                cache: None,
+                depth_stencil: None,
+            });
+
         State {
             surface,
             queue,
             size,
             device,
-            render_pipeline,
-            texture_format,
+            framebuffer_pipeline,
+            post_process_pipeline,
+            texture_format: surface_texture_format,
             texture_bind_group,
+            post_process_bind_group: framebuffer_bind_group,
             uniform_position_bind_groups,
+            framebuffer_texture_view,
         }
     }
 
@@ -267,12 +349,36 @@ impl State {
         let surface_view = surface_texture
             .texture
             .create_view(&wgpu::wgt::TextureViewDescriptor::default());
+
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::wgt::CommandEncoderDescriptor::default());
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("render_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.framebuffer_texture_view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLUE),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                ..Default::default()
+            });
+            render_pass.set_pipeline(&self.framebuffer_pipeline);
+            render_pass.set_bind_group(0, Some(&self.texture_bind_group), &[]);
+
+            for uniform_position_bind_group in self.uniform_position_bind_groups.clone() {
+                render_pass.set_bind_group(1, Some(&uniform_position_bind_group), &[]);
+                render_pass.draw(0..6, 0..1);
+            }
+        }
+
+        {
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("post_process_render_pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &surface_view,
                     depth_slice: None,
@@ -284,13 +390,9 @@ impl State {
                 })],
                 ..Default::default()
             });
-            render_pass.set_pipeline(&self.render_pipeline);
-            render_pass.set_bind_group(0, Some(&self.texture_bind_group), &[]);
-
-            for uniform_position_bind_group in self.uniform_position_bind_groups.clone() {
-                render_pass.set_bind_group(1, Some(&uniform_position_bind_group), &[]);
-                render_pass.draw(0..6, 0..1);
-            }
+            render_pass.set_pipeline(&self.post_process_pipeline);
+            render_pass.set_bind_group(0, Some(&self.post_process_bind_group), &[]);
+            render_pass.draw(0..6, 0..1);
         }
         self.queue.submit([encoder.finish()].into_iter());
         surface_texture.present();
